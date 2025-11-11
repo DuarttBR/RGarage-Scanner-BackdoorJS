@@ -3,8 +3,19 @@
 [![Python](https://img.shields.io/badge/Python-3.6+-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![FiveM](https://img.shields.io/badge/FiveM-Server-orange.svg)](https://fivem.net/)
+[![Ryu Garage](https://img.shields.io/badge/Desenvolvido%20por-Ryu%20Garage-orange?style=flat-square)](https://github.com/ryugarage)
 
-Scanner Python para detectar e remover backdoors em servidores FiveM. Protege seu servidor contra código malicioso, arquivos JavaScript ofuscados e injeções em arquivos de configuração.
+> **Scanner Python para detectar e remover backdoors em servidores FiveM**  
+> Protege seu servidor contra código malicioso, arquivos JavaScript ofuscados e injeções em arquivos de configuração.
+
+<div align="center">
+
+**Desenvolvido com ❤️ por [Ryu Garage](https://github.com/ryugarage)**
+
+[![Made with Python](https://img.shields.io/badge/Made%20with-Python-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![FiveM](https://img.shields.io/badge/FiveM-Server-orange?style=for-the-badge)](https://fivem.net/)
+
+</div>
 
 ## ✨ Funcionalidades
 
@@ -207,6 +218,22 @@ Desenvolvido para proteger servidores FiveM contra backdoors e código malicioso
 **🔗 Links Úteis**:
 - [Documentação FiveM](https://docs.fivem.net/)
 - [Python Documentation](https://docs.python.org/)
+
+---
+
+## 👨‍💻 Desenvolvido por
+
+<div align="center">
+
+### 🏍️ Ryu Garage
+
+**Proteção e Segurança para Servidores FiveM**
+
+[![Ryu Garage](https://img.shields.io/badge/Ryu%20Garage-Developer-orange?style=for-the-badge)](https://github.com/ryugarage)
+
+*Desenvolvido com ❤️ para a comunidade FiveM*
+
+</div>
 
 ---
 
