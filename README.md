@@ -43,58 +43,217 @@
 
 ## 🚀 Instalação
 
-### Requisitos
-- Python 3.6 ou superior
-- Windows (para arquivos `.bat`) ou qualquer sistema com Python
+### 📋 Requisitos
 
-### Download
-1. Clone ou baixe este repositório
-2. Navegue até a pasta `scanner_backdoor`
+Antes de usar o scanner, certifique-se de ter:
+
+- ✅ **Python 3.6 ou superior** instalado
+  - Verifique se está instalado: `python --version` ou `python3 --version`
+  - Se não tiver, baixe em: [https://www.python.org/downloads/](https://www.python.org/downloads/)
+  - **Importante**: Durante a instalação, marque a opção "Add Python to PATH"
+- ✅ **Windows** (para usar os arquivos `.bat`) ou qualquer sistema com Python
+- ✅ **Acesso de leitura/escrita** ao diretório do servidor
+- ✅ **Permissões administrativas** (recomendado, para poder deletar arquivos protegidos)
+
+### 📁 Estrutura de Pastas e Onde Colocar
+
+#### ⚠️ IMPORTANTE: Onde Colocar o Scanner
+
+O scanner **DEVE** estar na **pasta raiz do servidor FiveM**, no mesmo nível das pastas `resources`, `artifacts`, `teste`, etc.
+
+**Por quê?** O scanner escaneia a pasta pai (onde está `resources`, `artifacts`, etc.), por isso ele precisa estar na pasta raiz do servidor.
+
+#### ✅ Estrutura Correta:
+
+```
+E:\Bases\                    ← PASTA RAIZ DO SERVIDOR
+├── resources\                         ← Pasta de recursos
+├── artifacts\                         ← Pasta de artefatos
+├── teste\                            ← Outras pastas do servidor
+├── server.cfg                         ← Arquivos de configuração
+├── server.bat                         ← Scripts do servidor
+└── scanner_backdoor\                  ← 📁 PASTA DO SCANNER (AQUI!)
+    ├── scan_backdoor.py
+    ├── scan_backdoor.bat
+    ├── scan_backdoor_auto.bat
+    ├── scan_backdoor_auto_delete.py
+    ├── README.md
+    └── INSTRUCOES.txt
+```
+
+#### ❌ Estrutura INCORRETA (NÃO coloque assim):
+
+```
+E:\Bases\
+├── resources\
+│   └── scanner_backdoor\              ← ❌ ERRADO! Não coloque aqui
+```
+
+### 📝 Passos para Instalação:
+
+1. **Baixe ou clone este repositório**
+   - Se baixou como ZIP, extraia o arquivo
+   - Se clonou, você já tem a pasta `scanner_backdoor`
+
+2. **Mova a pasta `scanner_backdoor` para a pasta raiz do seu servidor FiveM**
+   - A pasta raiz é onde estão as pastas `resources`, `artifacts`, `server.cfg`, etc.
+   - **IMPORTANTE**: A pasta `scanner_backdoor` deve estar no mesmo nível que a pasta `resources`
+   - Não coloque dentro de `resources` ou em qualquer outra pasta
+
+3. **Verifique se Python está instalado:**
+   ```bash
+   python --version
+   # ou
+   python3 --version
+   ```
+   - Se aparecer um erro, instale o Python primeiro
+
+4. **Teste o scanner (opcional):**
+   ```bash
+   cd scanner_backdoor
+   python scan_backdoor.py --dry-run
+   ```
+
+### 🎯 Exemplo Prático:
+
+Se seu servidor está em `C:\FiveM\MeuServidor\`, a estrutura deve ser:
+
+```
+C:\FiveM\MeuServidor\
+├── resources\
+├── artifacts\
+├── server.cfg
+└── scanner_backdoor\          ← Coloque aqui!
+    ├── scan_backdoor.py
+    └── scan_backdoor.bat
+```
+
+### 🔧 Como Funciona:
+
+1. **O scanner detecta sua localização**: Quando você executa o script, ele identifica que está dentro da pasta `scanner_backdoor`
+
+2. **Escaneia a pasta pai**: O scanner sobe um nível (pasta pai) e escaneia tudo que está lá, incluindo:
+   - `resources/` (e todas as subpastas)
+   - `artifacts/` (e todas as subpastas)
+   - `teste/` (e todas as subpastas)
+   - Qualquer outra pasta no mesmo nível
+
+3. **Detecta padrões maliciosos**: Procura por:
+   - Código XOR ofuscado em arquivos `.js`
+   - Arquivos com nomes suspeitos (começando com ponto ou imitando arquivos Git)
+   - Linhas maliciosas em arquivos `fxmanifest.lua`
+
+4. **Gera relatório**: Cria um arquivo de relatório na pasta raiz do servidor com todos os achados
+
+5. **Remove (se confirmado)**: Deleta arquivos maliciosos e limpa linhas suspeitas de `fxmanifest.lua`
 
 ## 📖 Como Usar
 
+### 🎯 Passo a Passo Básico
+
+1. **Navegue até a pasta `scanner_backdoor`**:
+   ```bash
+   cd scanner_backdoor
+   ```
+
+2. **Execute o scanner** (escolha um dos modos abaixo)
+
+3. **Aguarde o scan terminar** - O scanner mostrará o progresso
+
+4. **Revise os resultados** - Veja o relatório gerado
+
 ### Modo Interativo (Recomendado)
+
+Este é o modo mais seguro, pois pergunta antes de cada ação.
 
 **Windows:**
 ```bash
-# Duplo clique em:
+# Opção 1: Duplo clique no arquivo
+scan_backdoor.bat
+
+# Opção 2: Pelo terminal
+cd scanner_backdoor
 scan_backdoor.bat
 ```
 
 **Linux/Mac:**
 ```bash
+cd scanner_backdoor
 python scan_backdoor.py
 ```
 
-O scanner irá:
-- ✅ Escanear todo o diretório
-- ✅ Mostrar arquivos maliciosos encontrados
-- ✅ Perguntar antes de deletar/limpar
-- ✅ Gerar relatório detalhado
+**O que acontece:**
+1. ✅ O scanner inicia e mostra um banner
+2. ✅ Escaneia todo o diretório raiz do servidor (onde está a pasta `scanner_backdoor`)
+3. ✅ Mostra arquivos maliciosos encontrados (se houver)
+4. ✅ Mostra linhas maliciosas em `fxmanifest.lua` (se houver)
+5. ✅ **Pergunta antes de deletar cada arquivo**: "Deseja deletar [arquivo]? (s/n)"
+6. ✅ **Pergunta antes de limpar cada `fxmanifest.lua`**: "Deseja limpar [arquivo]? (s/n)"
+7. ✅ Remove apenas o que você confirmar
+8. ✅ Gera relatório detalhado na pasta raiz do servidor
+
+**Vantagens:**
+- Você tem controle total sobre o que é deletado
+- Pode revisar cada arquivo antes de remover
+- Mais seguro para uso em produção
 
 ### Modo Automático
 
+Este modo remove automaticamente tudo que encontrar, **sem perguntar**.
+
 **Windows:**
 ```bash
-# Duplo clique em:
+# Opção 1: Duplo clique no arquivo
+scan_backdoor_auto.bat
+
+# Opção 2: Pelo terminal
+cd scanner_backdoor
 scan_backdoor_auto.bat
 ```
 
 **Linux/Mac:**
 ```bash
+cd scanner_backdoor
 python scan_backdoor_auto_delete.py
 ```
 
-⚠️ **ATENÇÃO**: O modo automático deleta arquivos e remove linhas maliciosas **sem confirmação**!
+**O que acontece:**
+1. ✅ O scanner inicia e mostra um banner
+2. ✅ Escaneia todo o diretório raiz do servidor
+3. ✅ Mostra arquivos maliciosos encontrados
+4. ✅ **Deleta automaticamente** todos os arquivos maliciosos encontrados
+5. ✅ **Remove automaticamente** todas as linhas maliciosas de `fxmanifest.lua`
+6. ✅ Gera relatório detalhado
+
+⚠️ **ATENÇÃO**: 
+- Este modo **NÃO PERGUNTA** antes de deletar
+- Use apenas se tiver certeza do que está fazendo
+- **SEMPRE faça backup antes de usar este modo**
+- Recomendado apenas para uso após testar com o modo interativo
 
 ### Modo Dry-Run (Simulação)
 
-Para testar sem fazer alterações:
+Este modo apenas **simula** o scan, sem fazer nenhuma alteração. Perfeito para testar!
+
+**Como usar:**
 ```bash
+cd scanner_backdoor
 python scan_backdoor.py --dry-run
 # ou
 python scan_backdoor.py -n
 ```
+
+**O que acontece:**
+1. ✅ Escaneia todo o diretório
+2. ✅ Mostra o que **seria** deletado (mas não deleta)
+3. ✅ Mostra o que **seria** limpo (mas não limpa)
+4. ✅ Gera relatório mostrando o que seria feito
+5. ✅ **Nenhum arquivo é modificado ou deletado**
+
+**Quando usar:**
+- Para testar o scanner pela primeira vez
+- Para verificar se há backdoors sem fazer alterações
+- Para revisar o que seria removido antes de executar de verdade
 
 ## 📁 Estrutura de Arquivos
 
@@ -176,6 +335,22 @@ python --version
 - Verifique se o arquivo não está em uso
 - Feche editores que possam estar usando o arquivo
 - Tente executar como administrador
+- Verifique se o arquivo não está com permissões de somente leitura
+
+### Scanner não encontra arquivos
+- **Verifique se o scanner está na pasta raiz do servidor**
+  - A pasta `scanner_backdoor` deve estar no mesmo nível que `resources`, `artifacts`, etc.
+  - Não deve estar dentro de `resources` ou qualquer outra pasta
+- **Certifique-se de que está executando a partir da pasta `scanner_backdoor`**
+  - Use `cd scanner_backdoor` antes de executar
+- **O scanner escaneia a pasta pai** (onde está `resources`, `artifacts`, etc.)
+  - Se você colocar o scanner em outro lugar, ele não vai escanear o servidor corretamente
+- **Verifique se o caminho está correto**:
+  ```bash
+  # No Windows, verifique onde você está:
+  cd
+  # Deve mostrar algo como: E:\Bases\LongBeach\scanner_backdoor
+  ```
 
 ## 📝 Exemplos de Uso
 
