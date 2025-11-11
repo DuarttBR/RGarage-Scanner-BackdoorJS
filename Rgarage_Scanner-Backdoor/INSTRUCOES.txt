@@ -1,0 +1,103 @@
+═══════════════════════════════════════════════════════════════════════════════
+🔍 SCANNER DE BACKDOOR - Instruções de Uso
+═══════════════════════════════════════════════════════════════════════════════
+
+📁 PASTA: scanner_backdoor
+📅 Criado em: 10/11/2025
+🏍️ Desenvolvido por: RYU GARAGE
+
+═══════════════════════════════════════════════════════════════════════════════
+🚀 COMO USAR
+═══════════════════════════════════════════════════════════════════════════════
+
+1️⃣  MODO INTERATIVO (Recomendado)
+   ────────────────────────────────────────────────────────────────────────────
+   Duplo clique em: scan_backdoor.bat
+   
+   ✓ Escaneia todo o diretório
+   ✓ Mostra arquivos maliciosos encontrados
+   ✓ Mostra linhas maliciosas em fxmanifest.lua
+   ✓ PERGUNTA antes de deletar/limpar
+   ✓ Remove linhas maliciosas de fxmanifest.lua
+   ✓ Gera relatório detalhado
+
+2️⃣  MODO AUTOMÁTICO (Deleta sem perguntar)
+   ────────────────────────────────────────────────────────────────────────────
+   Duplo clique em: scan_backdoor_auto.bat
+   
+   ⚠️  ATENÇÃO: Deleta e limpa automaticamente sem confirmação!
+   ✓ Escaneia todo o diretório
+   ✓ Deleta automaticamente todos os arquivos maliciosos
+   ✓ Remove automaticamente linhas maliciosas de fxmanifest.lua
+   ✓ Gera relatório detalhado
+
+═══════════════════════════════════════════════════════════════════════════════
+📋 ARQUIVOS INCLUSOS
+═══════════════════════════════════════════════════════════════════════════════
+
+• scan_backdoor.py              - Script Python principal
+• scan_backdoor.bat             - Executável Windows (modo interativo)
+• scan_backdoor_auto.bat        - Executável Windows (modo automático)
+• scan_backdoor_auto_delete.py  - Script Python (modo automático)
+• README_SCANNER.md             - Documentação completa
+• INSTRUCOES.txt                - Este arquivo
+
+═══════════════════════════════════════════════════════════════════════════════
+🔍 O QUE O SCANNER DETECTA
+═══════════════════════════════════════════════════════════════════════════════
+
+✓ Código XOR ofuscado
+✓ Arquivos JavaScript ocultos (nomes começando com ponto)
+✓ Arquivos com nomes suspeitos (ex: gitignore.js, gitattributes.js)
+✓ Linhas maliciosas em fxmanifest.lua
+  - Padrão: --[[server.lua]] seguido de muitos espaços e arquivo .js
+  - Exemplo: --[[server.lua]]                                 'temp/.env.local.js'
+✓ Padrões específicos de backdoor:
+  - x=(e,k=3)=>[...e].map(c=>String.fromCharCode(c.charCodeAt()^k))
+  - x=s=>eval(s.replace(/\\u([0-9a-f]{4})/g,...))
+  - globalThis[x("fubo")]
+  - Comentários /* [ nome_recurso ] */ seguidos de código ofuscado
+
+═══════════════════════════════════════════════════════════════════════════════
+⚠️  AVISOS IMPORTANTES
+═══════════════════════════════════════════════════════════════════════════════
+
+⚠️  SEMPRE faça backup antes de executar o scanner!
+⚠️  O modo automático deleta arquivos sem confirmação!
+⚠️  Alguns arquivos podem requerer permissões administrativas!
+
+═══════════════════════════════════════════════════════════════════════════════
+📊 RELATÓRIO
+═══════════════════════════════════════════════════════════════════════════════
+
+O scanner gera um relatório em formato texto:
+• Nome: relatorio_scan_YYYYMMDD_HHMMSS.txt
+• Local: Mesmo diretório onde o scanner foi executado
+• Conteúdo: 
+  - Lista completa de arquivos JavaScript maliciosos encontrados
+  - Lista de arquivos fxmanifest.lua com linhas maliciosas
+  - Número de arquivos deletados
+  - Número de linhas removidas
+
+═══════════════════════════════════════════════════════════════════════════════
+💡 DICAS
+═══════════════════════════════════════════════════════════════════════════════
+
+• Execute primeiro em modo interativo para ver o que será deletado
+• Revise o relatório antes de executar novamente
+• Use o modo automático apenas se tiver certeza
+• Mantenha backups regulares do servidor
+• O scanner remove apenas linhas maliciosas de fxmanifest.lua, preservando o resto
+
+═══════════════════════════════════════════════════════════════════════════════
+👨‍💻 DESENVOLVIDO POR
+═══════════════════════════════════════════════════════════════════════════════
+
+🏍️  RYU GARAGE
+
+Proteção e Segurança para Servidores FiveM
+
+Desenvolvido com ❤️ para a comunidade FiveM
+
+═══════════════════════════════════════════════════════════════════════════════
+
