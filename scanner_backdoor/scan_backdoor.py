@@ -27,454 +27,668 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
-# Padrões maliciosos para detectar
-MALICIOUS_PATTERNS = [
-    # Padrão 1: x=(e,k=3)=>[...e].map(c=>String.fromCharCode(c.charCodeAt()^k))
+# Forçar UTF-8 no terminal Windows
+if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
+# ---------------------------------------------------------------------------
+# Padrões de detecção em arquivos .js
+# ---------------------------------------------------------------------------
+# Variante antiga (mantida para compatibilidade retroativa)
+JS_PATTERNS_LEGACY = [
     r'x=\(e,k=3\)=>\[\.\.\.e\]\.map\(c=>String\.fromCharCode\(c\.charCodeAt\(\)\^k\)\)',
-    # Padrão 2: x=s=>eval(s.replace(/\\u([0-9a-f]{4})/g,(_,h)=>String.fromCharCode(parseInt(h,16))).split('').map(c=>String.fromCharCode(c.charCodeAt(0)^3))
     r'x=s=>eval\(s\.replace\(/\\\\u\(\[0-9a-f\]\{4\}\)/g',
-    # Padrão 3: globalThis[x("fubo")]
     r'globalThis\[x\("fubo"\)\]',
-    # Padrão 4: Comentário suspeito /* [ nome_recurso ] */
     r'/\*\s*\[\s*[^\]]+\s*\]\s*\*/.*x=\(e,k=3\)',
     r'/\*\s*\[\s*[^\]]+\s*\]\s*\*/.*x=s=>eval',
 ]
 
-# Extensões de arquivo para verificar
+# Variante atual: XOR com prefixo "kmm" + fromCharCode
+# Padrão: (function(){const kmmXXXXX=N;function dmmXXXXX(a,k){...String.fromCharCode(a[i]^k)...}
+JS_PATTERNS_CURRENT = [
+    # Função auto-executável iniciada com const kmm
+    r'\(function\(\)\{const\s+kmm\w+\s*=\s*\d+',
+    # Variável com prefixo kmm + uso de fromCharCode XOR
+    r'const\s+kmm\w+\s*=\s*\d+.*String\.fromCharCode',
+    # Função decodificadora XOR com array de inteiros
+    r'function\s+\w+\(a,k\)\{var\s+s=\'\'\;for\(var\s+i=0',
+    # Array de inteiros XOR com fromCharCode (assinatura compacta)
+    r'String\.fromCharCode\(a\[i\]\^k\)',
+    # Array longo de inteiros (>= 10 valores) típico de payload XOR
+    r'const\s+\w+=\[(\d{2,3},){9,}\d{2,3}\]',
+]
+
+MALICIOUS_PATTERNS = JS_PATTERNS_LEGACY + JS_PATTERNS_CURRENT
+
+# ---------------------------------------------------------------------------
+# Padrões de detecção em arquivos .lua
+# ---------------------------------------------------------------------------
+
+# Padrão 1: load() executando O MESMO PARÂMETRO recebido de evento de rede
+# Detecta: AddEventHandler('evento', function(PARAM) ... load(PARAM)() ... end)
+# O backreference \1 garante que só flagra quando load() executa o param do handler
+# Isso é execução remota de código (RCE) nos clientes
+LUA_NET_LOAD_RCE = re.compile(
+    r'AddEventHandler\s*\([^,]+,\s*function\s*\(\s*(\w+)\b[^)]*\)'
+    r'.*?'
+    r'(?:assert\s*\(\s*)?load\s*\(\s*\1\s*\)\s*\)?\s*\(\)',
+    re.DOTALL | re.IGNORECASE
+)
+
+# Padrão 2: Luraph/obfuscadores em arquivos que NÃO são de scripts pagos conhecidos
+LUA_OBFUSCATED_MARKER = re.compile(
+    r'--\s*This file was (?:protected|generated) using (?:Luraph|Prometheus|Alcatraz|obfusc)',
+    re.IGNORECASE
+)
+
+# Prefixos de pastas de scripts pagos onde obfuscação é esperada (legítimo)
+TRUSTED_OBFUSCATED_PREFIXES = [
+    'xd_', 'xd-',          # XD Scripts
+    'zo_', 'zo-',          # ZO Scripts
+    'lb-', 'lb_',          # LB Scripts
+    'wn', 'warn',          # WarnZera/WN Scripts
+    'ox_', 'ox-',          # OX Scripts
+    'loaf_', 'loaf-',      # Loaf Scripts
+    'qb-', 'qb_',          # QB Scripts
+    'es_', 'esx_',         # ESX Scripts
+    'ps-', 'ps_',          # Project Sloth
+    'cd_', 'cd-',          # CD Scripts
+    'codem-',              # CodeM
+    'renewed-',            # Renewed Scripts
+    'bl_', 'bl-',          # BL Scripts
+    'okokBanking', 'okokNotify', 'okokTextUI',  # OKOK Scripts
+]
+
+# ---------------------------------------------------------------------------
+# Padrões de detecção em fxmanifest.lua
+# ---------------------------------------------------------------------------
+# Bloco shared_scripts ou server_scripts que contém arquivos .js injetados
+MANIFEST_INJECT_PATTERN = re.compile(
+    r'(shared_scripts|server_scripts)\s*\{[^}]*\.js[^}]*\}',
+    re.IGNORECASE | re.DOTALL
+)
+
+# Linha de comentário usada pelo ColdGG Dumper (marca do vetor de infecção)
+COLDGG_MARKER = re.compile(r'ColdGG\s*Dumper', re.IGNORECASE)
+
+# Padrão antigo de injeção via comentário Lua
+MANIFEST_LEGACY_PATTERN = re.compile(
+    r'--\[\[server\.lua\]\]\s+[\'"](.*\.js)[\'"]'
+)
+
+# ---------------------------------------------------------------------------
+# Configurações gerais
+# ---------------------------------------------------------------------------
 CHECK_EXTENSIONS = ['.js', '.lua']
 
-# Pastas para ignorar
 IGNORE_PATHS = [
     'node_modules',
     '.git',
     '__pycache__',
     '.vscode',
     '.idea',
+    'scanner_backdoor',   # nunca escanear a si mesmo
+    'artifacts',          # binários do servidor FiveM - não tocar
 ]
 
-# Nomes de arquivos suspeitos (tentam se passar por arquivos legítimos do Git)
 SUSPICIOUS_FILENAMES = [
-    'gitignore.js',
-    '.gitignore.js',
-    'gitattributes.js',
-    '.gitattributes.js',
-    'gitconfig.js',
-    '.gitconfig.js',
-    'gitkeep.js',
-    '.gitkeep.js',
-    'gitmodules.js',
-    '.gitmodules.js',
-    'githooks.js',
-    '.githooks.js',
+    'gitignore.js', '.gitignore.js',
+    'gitattributes.js', '.gitattributes.js',
+    'gitconfig.js', '.gitconfig.js',
+    'gitkeep.js', '.gitkeep.js',
+    'gitmodules.js', '.gitmodules.js',
+    'githooks.js', '.githooks.js',
 ]
 
-# Tamanho máximo de arquivo para verificar (em bytes)
-MAX_FILE_SIZE = 50000  # 50KB
+MAX_FILE_SIZE = 500_000  # 500KB (aumentado para cobrir arquivos maiores)
+
 
 class BackdoorScanner:
     def __init__(self, root_path):
         self.root_path = Path(root_path)
-        self.malicious_files = []
-        self.malicious_lines = []  # Arquivos com linhas maliciosas para limpar
+        self.malicious_files = []          # arquivos JS a deletar
+        self.malicious_manifests = []      # (path, blocos_maliciosos) de fxmanifest.lua a limpar
+        self.suspicious_lua = []           # (path, motivo) arquivos Lua suspeitos (avisos)
         self.scanned_files = 0
         self.scanned_dirs = 0
-        
+
+    # ------------------------------------------------------------------
+    # Utilitários
+    # ------------------------------------------------------------------
+
     def should_ignore(self, path):
-        """Verifica se o caminho deve ser ignorado"""
         path_str = str(path)
         for ignore in IGNORE_PATHS:
             if ignore in path_str:
                 return True
         return False
-    
+
     def is_suspicious_filename(self, file_path):
-        """Verifica se o nome do arquivo é suspeito (tenta se passar por arquivo legítimo)"""
-        filename_lower = file_path.name.lower()
-        for suspicious in SUSPICIOUS_FILENAMES:
-            if suspicious.lower() in filename_lower or filename_lower == suspicious.lower():
-                return True
-        return False
-    
-    def is_malicious_file(self, file_path):
-        """Verifica se um arquivo contém código malicioso"""
+        name_lower = file_path.name.lower()
+        return any(s.lower() in name_lower or name_lower == s.lower()
+                   for s in SUSPICIOUS_FILENAMES)
+
+    def read_file(self, file_path):
+        """Lê arquivo de forma segura; retorna None se falhar ou for grande demais."""
         try:
-            # Verifica se o nome do arquivo é suspeito (ex: gitignore.js)
-            if self.is_suspicious_filename(file_path):
-                return True
-            
-            # Verifica se é arquivo oculto (começa com ponto)
-            if file_path.name.startswith('.'):
-                # Verifica tamanho
-                if file_path.stat().st_size > MAX_FILE_SIZE:
-                    return False
-                
-                # Lê o conteúdo do arquivo
-                try:
-                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                        content = f.read(MAX_FILE_SIZE)  # Lê apenas os primeiros bytes
-                        
-                        # Verifica padrões maliciosos
-                        for pattern in MALICIOUS_PATTERNS:
-                            if re.search(pattern, content, re.IGNORECASE | re.DOTALL):
-                                return True
-                except Exception as e:
-                    # Se não conseguir ler, verifica pelo nome
-                    suspicious_names = ['.eventhandler', '.snapshot', '.dummydata', '.rollup.config', 
-                                       '.env', '.tsup.config', '.webpack.config', 'gitignore', 
-                                       'gitattributes', 'gitconfig']
-                    if any(name in file_path.name.lower() for name in suspicious_names):
-                        return True
-                    return False
-            
-            # Verifica arquivos normais também
             if file_path.stat().st_size > MAX_FILE_SIZE:
-                return False
-                
-            try:
-                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    content = f.read(MAX_FILE_SIZE)
-                    
-                    # Verifica padrões maliciosos
-                    for pattern in MALICIOUS_PATTERNS:
-                        if re.search(pattern, content, re.IGNORECASE | re.DOTALL):
-                            return True
-            except:
-                return False
-                
-        except Exception as e:
+                return None
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                return f.read()
+        except Exception:
+            return None
+
+    # ------------------------------------------------------------------
+    # Detecção de JS malicioso
+    # ------------------------------------------------------------------
+
+    def is_malicious_js(self, file_path):
+        """Retorna True se o arquivo JS contiver código XOR/backdoor."""
+        if self.is_suspicious_filename(file_path):
+            return True
+
+        content = self.read_file(file_path)
+        if content is None:
             return False
-            
+
+        for pattern in MALICIOUS_PATTERNS:
+            if re.search(pattern, content, re.IGNORECASE | re.DOTALL):
+                return True
         return False
-    
-    def has_malicious_manifest_line(self, file_path):
-        """Verifica se um arquivo fxmanifest.lua contém linhas maliciosas
-        Retorna: False se não encontrar, ou (True, line_num, line_content) se encontrar
+
+    # ------------------------------------------------------------------
+    # Detecção de Lua suspeito
+    # ------------------------------------------------------------------
+
+    def is_trusted_obfuscated_path(self, file_path):
+        """Retorna True se o arquivo está em pasta de script pago conhecido."""
+        path_str = str(file_path).replace('\\', '/').lower()
+        for prefix in TRUSTED_OBFUSCATED_PREFIXES:
+            # Verifica se algum segmento do path começa com o prefixo
+            if any(part.startswith(prefix.lower())
+                   for part in path_str.split('/')):
+                return True
+        return False
+
+    def check_lua_backdoor(self, file_path):
+        """
+        Analisa arquivo .lua em busca de padrões de backdoor.
+        Retorna lista de (tipo, descricao) ou lista vazia.
+        """
+        findings = []
+        content = self.read_file(file_path)
+        if content is None:
+            return findings
+
+        # 1. load() executando o parâmetro do handler de evento de rede (RCE)
+        for match in LUA_NET_LOAD_RCE.finditer(content):
+            param = match.group(1)
+            findings.append((
+                'LUA_RCE',
+                f'AddEventHandler executa load({param})() — '
+                f'execucao remota de codigo no cliente/servidor'
+            ))
+
+        # 2. Luraph/obfuscador fora de scripts pagos
+        if LUA_OBFUSCATED_MARKER.search(content):
+            if not self.is_trusted_obfuscated_path(file_path):
+                findings.append((
+                    'LUA_OBFUSCATED',
+                    'Arquivo Lua obfuscado (Luraph/Prometheus) fora de '
+                    'pasta de script pago — verificar manualmente'
+                ))
+
+        return findings
+
+    # ------------------------------------------------------------------
+    # Detecção de fxmanifest.lua infectado
+    # ------------------------------------------------------------------
+
+    def find_malicious_manifest_blocks(self, file_path):
+        """
+        Retorna lista de blocos injetados no manifest, ou lista vazia.
+        Só flagra blocos que contenham pelo menos um JS confirmado como malicioso.
         """
         if file_path.name.lower() != 'fxmanifest.lua':
-            return False
-        
-        try:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                lines = f.readlines()
-                
-            # Padrão: --[[server.lua]] seguido de muitos espaços e depois um arquivo .js
-            # Regex: --\[\[server\.lua\]\]\s+['"].*\.js['"]
-            pattern = r'--\[\[server\.lua\]\]\s+[\'"](.*\.js)[\'"]'
-            
-            for line_num, line in enumerate(lines, 1):
-                if re.search(pattern, line):
-                    return (True, line_num, line.strip())
-                    
-        except Exception as e:
-            return False
-        
-        return False
-    
-    def clean_manifest_file(self, file_path, dry_run=False):
-        """Remove linhas maliciosas de um arquivo fxmanifest.lua"""
-        try:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                lines = f.readlines()
-            
-            pattern = r'--\[\[server\.lua\]\]\s+[\'"](.*\.js)[\'"]'
-            cleaned_lines = []
-            removed_count = 0
-            
+            return []
+
+        content = self.read_file(file_path)
+        if content is None:
+            return []
+
+        found = []
+
+        # Padrão atual: shared_scripts/server_scripts com .js
+        for match in MANIFEST_INJECT_PATTERN.finditer(content):
+            block = match.group(0)
+            # Verifica se pelo menos um JS no bloco é malicioso
+            js_refs = re.findall(r"['\"]([^'\"]+\.js)['\"]", block)
+            for js_rel in js_refs:
+                js_abs = file_path.parent / js_rel
+                if self.is_malicious_js(js_abs):
+                    found.append(block)
+                    break
+
+        # Padrão legado: --[[server.lua]] com .js
+        for match in MANIFEST_LEGACY_PATTERN.finditer(content):
+            found.append(match.group(0))
+
+        return found
+
+    # ------------------------------------------------------------------
+    # Limpeza de fxmanifest.lua
+    # ------------------------------------------------------------------
+
+    def clean_manifest(self, file_path, dry_run=False):
+        """
+        Limpeza cirúrgica de fxmanifest.lua:
+        - Se o bloco contém APENAS .js maliciosos -> remove o bloco inteiro
+        - Se o bloco é misto (dll, glob + .js malicioso) -> remove só as linhas .js
+        Retorna (blocos_modificados, arquivos_js_deletados).
+        """
+        content = self.read_file(file_path)
+        if content is None:
+            return 0, 0
+
+        removed_js_files = []
+        modifications = [0]
+
+        def process_block(match):
+            block_text = match.group(0)
+
+            inner_match = re.search(r'\{(.*?)\}', block_text, re.DOTALL)
+            if not inner_match:
+                return block_text
+
+            inner = inner_match.group(1)
+            lines = inner.split('\n')
+
+            new_lines = []
+            js_lines_removed = 0
+
             for line in lines:
-                if re.search(pattern, line):
-                    if not dry_run:
-                        removed_count += 1
+                js_ref = re.search(r"['\"]([^'\"]+\.js)['\"]", line)
+                if js_ref:
+                    js_rel = js_ref.group(1)
+                    js_abs = file_path.parent / js_rel
+                    is_bad = (
+                        any(p.resolve() == js_abs.resolve() for p in self.malicious_files)
+                        or self.is_malicious_js(js_abs)
+                    )
+                    if is_bad:
+                        removed_js_files.append(js_abs)
+                        js_lines_removed += 1
+                        continue  # remove a linha
+                new_lines.append(line)
+
+            if js_lines_removed == 0:
+                return block_text
+
+            modifications[0] += 1
+
+            # Verificar se sobrou alguma entrada útil
+            useful = [
+                l for l in new_lines
+                if l.strip()
+                and not re.match(r'\s*(shared_scripts|server_scripts)\s*\{?\s*$', l)
+                and l.strip() != '}'
+                and l.strip() != '{'
+            ]
+
+            if not useful:
+                if dry_run:
+                    print(f"   [DRY-RUN] Removeria bloco completo")
+                return ''
+            else:
+                # Bloco misto: reconstrói sem as linhas JS maliciosas
+                # Substituir apenas o conteúdo interno, mantendo "keyword { ... }"
+                new_inner = '\n'.join(new_lines)
+                # Limpar vírgula pendente antes do fechamento }
+                new_inner = re.sub(r',(\s*\n\s*\})', r'\1', new_inner)
+                new_block = block_text[:inner_match.start(1)] + new_inner + block_text[inner_match.end(1):]
+                if dry_run:
+                    print(f"   [DRY-RUN] Removeria linha(s) JS (mantendo entradas legítimas)")
+                return new_block
+
+        new_content = MANIFEST_INJECT_PATTERN.sub(process_block, content)
+
+        # Padrão legado
+        def remove_legacy(match):
+            modifications[0] += 1
+            return ''
+        new_content = MANIFEST_LEGACY_PATTERN.sub(remove_legacy, new_content)
+
+        # Remover comentários do ColdGG Dumper
+        new_content = re.sub(
+            r'\n-- .{0,5}Dump realizado com o ColdGG Dumper!.*?(?=\n\n|\Z)',
+            '',
+            new_content,
+            flags=re.DOTALL
+        )
+        new_content = re.sub(r'\n-- .{0,5}Discord ColdGG:[^\n]*', '', new_content)
+        new_content = re.sub(r'\n-- .{0,5}Convite permanente:[^\n]*', '', new_content)
+
+        new_content = new_content.rstrip() + '\n'
+
+        if dry_run:
+            print(f"   [DRY-RUN] {modifications[0]} modificação(ões) em {file_path.name}")
+            for js in removed_js_files:
+                print(f"             -> Deletaria JS: {js}")
+            return modifications[0], 0
+
+        # Salvar manifest limpo
+        if modifications[0] > 0:
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(new_content)
+            except Exception as e:
+                print(f"   ERRO ao salvar {file_path}: {e}")
+                return 0, 0
+
+        # Deletar arquivos JS maliciosos referenciados
+        deleted_js = 0
+        for js_path in removed_js_files:
+            if not js_path.exists():
+                continue
+            try:
+                js_path.unlink()
+                print(f"   JS deletado: {js_path}")
+                deleted_js += 1
+            except Exception:
+                try:
+                    import subprocess
+                    subprocess.run(['del', '/F', '/Q', str(js_path)],
+                                   shell=True, capture_output=True)
+                    if not js_path.exists():
+                        print(f"   JS deletado (cmd): {js_path}")
+                        deleted_js += 1
                     else:
-                        print(f"   [SIMULAÇÃO] Removeria linha: {line.strip()[:80]}...")
-                    continue
-                cleaned_lines.append(line)
-            
-            if removed_count > 0 and not dry_run:
-                with open(file_path, 'w', encoding='utf-8', errors='ignore') as f:
-                    f.writelines(cleaned_lines)
-                return removed_count
-            
-            return 0
-        except Exception as e:
-            print(f"   ❌ ERRO ao limpar {file_path}: {e}")
-            return 0
-    
+                        print(f"   ERRO: nao foi possivel deletar {js_path}")
+                except Exception as e2:
+                    print(f"   ERRO ao deletar {js_path}: {e2}")
+
+        return modifications[0], deleted_js
+
+    # ------------------------------------------------------------------
+    # Varredura principal
+    # ------------------------------------------------------------------
+
     def scan_directory(self, directory=None):
-        """Escaneia um diretório recursivamente"""
         if directory is None:
             directory = self.root_path
-            
         directory = Path(directory)
-        
+
         if not directory.exists():
-            print(f"❌ Diretório não existe: {directory}")
+            print(f"Diretório não existe: {directory}")
             return
-        
+
         if self.should_ignore(directory):
             return
-        
+
         try:
-            for item in directory.iterdir():
+            for item in sorted(directory.iterdir()):
                 if self.should_ignore(item):
                     continue
-                
+
                 if item.is_dir():
                     self.scanned_dirs += 1
                     self.scan_directory(item)
+
                 elif item.is_file():
                     self.scanned_files += 1
-                    if item.suffix.lower() in CHECK_EXTENSIONS:
-                        # Verifica arquivos JavaScript maliciosos
-                        if item.suffix.lower() == '.js' and self.is_malicious_file(item):
-                            self.malicious_files.append(item)
-                            # Indica o motivo da detecção
-                            if self.is_suspicious_filename(item):
-                                print(f"🔴 MALICIOSO ENCONTRADO (nome suspeito): {item}")
-                            else:
-                                print(f"🔴 MALICIOSO ENCONTRADO: {item}")
-                        # Verifica arquivos fxmanifest.lua com linhas maliciosas
-                        elif item.suffix.lower() == '.lua':
-                            result = self.has_malicious_manifest_line(item)
-                            if result:
-                                if isinstance(result, tuple):
-                                    _, line_num, line_content = result
-                                    self.malicious_lines.append((item, line_num, line_content))
-                                    print(f"🔴 LINHA MALICIOSA ENCONTRADA em {item} (linha {line_num})")
-                                else:
-                                    self.malicious_lines.append((item, 0, ""))
-                                    print(f"🔴 LINHA MALICIOSA ENCONTRADA em {item}")
+                    ext = item.suffix.lower()
+
+                    if ext == '.js' and self.is_malicious_js(item):
+                        self.malicious_files.append(item)
+                        print(f"[JS MALICIOSO] {item}")
+
+                    elif ext == '.lua':
+                        blocks = self.find_malicious_manifest_blocks(item)
+                        if blocks:
+                            self.malicious_manifests.append((item, blocks))
+                            print(f"[MANIFEST INFECTADO] {item} ({len(blocks)} bloco(s))")
+
+                        lua_findings = self.check_lua_backdoor(item)
+                        for tipo, descricao in lua_findings:
+                            self.suspicious_lua.append((item, tipo, descricao))
+                            print(f"[{tipo}] {item}")
+
         except PermissionError:
-            print(f"⚠️  Sem permissão para acessar: {directory}")
+            print(f"Sem permissão: {directory}")
         except Exception as e:
-            print(f"⚠️  Erro ao escanear {directory}: {e}")
-    
-    def clean_malicious_manifest_lines(self, dry_run=False):
-        """Remove linhas maliciosas de arquivos fxmanifest.lua"""
-        cleaned = 0
-        failed = 0
-        
-        if not self.malicious_lines:
-            return cleaned, failed
-        
-        print(f"\n📋 Total de arquivos fxmanifest.lua com linhas maliciosas: {len(self.malicious_lines)}")
-        
-        if dry_run:
-            print("\n🔍 MODO DRY-RUN (simulação) - Nenhuma linha será removida")
-        
-        for file_path, line_num, line_content in self.malicious_lines:
-            try:
-                removed = self.clean_manifest_file(file_path, dry_run)
-                if removed > 0:
-                    print(f"   ✅ LIMPO: {file_path} ({removed} linha(s) removida(s))")
-                    cleaned += removed
-                elif dry_run:
-                    print(f"   [SIMULAÇÃO] Limparia: {file_path}")
-            except Exception as e:
-                print(f"   ❌ ERRO ao limpar {file_path}: {e}")
-                failed += 1
-        
-        return cleaned, failed
-    
-    def delete_malicious_files(self, dry_run=False):
-        """Deleta arquivos maliciosos encontrados"""
-        deleted = 0
-        failed = 0
-        
-        if not self.malicious_files and not self.malicious_lines:
-            print("\n✅ Nenhum arquivo malicioso encontrado!")
-            return deleted, failed
-        
-        print(f"\n📋 Total de arquivos maliciosos encontrados: {len(self.malicious_files)}")
-        
-        if dry_run:
-            print("\n🔍 MODO DRY-RUN (simulação) - Nenhum arquivo será deletado")
-        
-        for file_path in self.malicious_files:
-            try:
+            print(f"Erro em {directory}: {e}")
+
+    # ------------------------------------------------------------------
+    # Limpeza em massa
+    # ------------------------------------------------------------------
+
+    def run_cleanup(self, dry_run=False):
+        """
+        Remove arquivos JS maliciosos standalone e limpa manifests infectados.
+        Arquivos JS referenciados pelos manifests são deletados durante a limpeza dos manifests.
+        """
+        total_js_deleted = 0
+        total_blocks_removed = 0
+
+        # 1. Limpar manifests (e deletar JS referenciados)
+        if self.malicious_manifests:
+            print(f"\n--- Limpando {len(self.malicious_manifests)} fxmanifest.lua infectado(s) ---")
+            cleaned_manifest_js = set()
+
+            for file_path, blocks in self.malicious_manifests:
+                print(f"\n  Manifest: {file_path}")
+                blocks_removed, js_deleted = self.clean_manifest(file_path, dry_run)
+                total_blocks_removed += blocks_removed
+                total_js_deleted += js_deleted
+
+                # Rastrear JS removidos por manifests para não deletar duplicado
+                for block in blocks:
+                    for js_ref in re.findall(r"['\"]([^'\"]+\.js)['\"]", block):
+                        cleaned_manifest_js.add((file_path.parent / js_ref).resolve())
+
+        # 2. Deletar arquivos JS maliciosos standalone (não referenciados por manifest)
+        standalone = [
+            f for f in self.malicious_files
+            if f.resolve() not in {
+                (file_path.parent / js_ref).resolve()
+                for file_path, blocks in self.malicious_manifests
+                for block in blocks
+                for js_ref in re.findall(r"['\"]([^'\"]+\.js)['\"]", block)
+            }
+        ]
+
+        if standalone:
+            print(f"\n--- Deletando {len(standalone)} JS malicioso(s) standalone ---")
+            for js_path in standalone:
                 if dry_run:
-                    print(f"   [SIMULAÇÃO] Deletaria: {file_path}")
+                    print(f"   [DRY-RUN] Deletaria: {js_path}")
                 else:
-                    # Tenta deletar usando diferentes métodos
                     try:
-                        os.remove(str(file_path))
-                        print(f"   ✅ DELETADO: {file_path}")
-                        deleted += 1
-                    except PermissionError:
-                        # Tenta com método alternativo
-                        try:
-                            import subprocess
-                            if sys.platform == 'win32':
-                                subprocess.run(['del', '/F', '/Q', str(file_path)], 
-                                             shell=True, capture_output=True)
-                                if not file_path.exists():
-                                    print(f"   ✅ DELETADO (cmd): {file_path}")
-                                    deleted += 1
-                                else:
-                                    raise Exception("Falha ao deletar")
-                            else:
-                                os.unlink(str(file_path))
-                                print(f"   ✅ DELETADO: {file_path}")
-                                deleted += 1
-                        except Exception as e2:
-                            print(f"   ❌ FALHA ao deletar {file_path}: {e2}")
-                            failed += 1
-            except Exception as e:
-                print(f"   ❌ ERRO ao processar {file_path}: {e}")
-                failed += 1
-        
-        return deleted, failed
-    
+                        js_path.unlink()
+                        print(f"   ✅ Deletado: {js_path}")
+                        total_js_deleted += 1
+                    except Exception as e:
+                        print(f"   ERRO: {js_path}: {e}")
+
+        return total_blocks_removed, total_js_deleted
+
+    # ------------------------------------------------------------------
+    # Relatório
+    # ------------------------------------------------------------------
+
     def generate_report(self):
-        """Gera relatório da varredura"""
-        report = []
-        report.append("=" * 80)
-        report.append("RELATÓRIO DE VARREdura - SCANNER DE BACKDOOR")
-        report.append("=" * 80)
-        report.append(f"Data/Hora: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
-        report.append(f"Diretório escaneado: {self.root_path}")
-        report.append(f"Arquivos escaneados: {self.scanned_files}")
-        report.append(f"Diretórios escaneados: {self.scanned_dirs}")
-        report.append(f"Arquivos JavaScript maliciosos encontrados: {len(self.malicious_files)}")
-        report.append(f"Arquivos fxmanifest.lua com linhas maliciosas: {len(self.malicious_lines)}")
-        report.append("")
-        
+        lines = []
+        sep = "=" * 80
+        tudo_limpo = (
+            not self.malicious_files
+            and not self.malicious_manifests
+            and not self.suspicious_lua
+        )
+        lines += [
+            sep,
+            "RELATORIO DE VARREDURA - SCANNER DE BACKDOOR",
+            sep,
+            f"Data/Hora: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}",
+            f"Diretorio escaneado: {self.root_path}",
+            f"Arquivos escaneados: {self.scanned_files}",
+            f"Diretorios escaneados: {self.scanned_dirs}",
+            f"Arquivos JS maliciosos: {len(self.malicious_files)}",
+            f"fxmanifest.lua infectados: {len(self.malicious_manifests)}",
+            f"Lua suspeitos (RCE/obfuscado): {len(self.suspicious_lua)}",
+            "",
+        ]
+
         if self.malicious_files:
-            report.append("ARQUIVOS JAVASCRIPT MALICIOSOS ENCONTRADOS:")
-            report.append("-" * 80)
-            for i, file_path in enumerate(self.malicious_files, 1):
-                report.append(f"{i}. {file_path}")
-            report.append("")
-        
-        if self.malicious_lines:
-            report.append("ARQUIVOS FXMANIFEST.LUA COM LINHAS MALICIOSAS:")
-            report.append("-" * 80)
-            for i, (file_path, line_num, line_content) in enumerate(self.malicious_lines, 1):
-                report.append(f"{i}. {file_path} (linha {line_num})")
-                if line_content:
-                    report.append(f"   Conteúdo: {line_content[:100]}...")
-            report.append("")
-        
-        if not self.malicious_files and not self.malicious_lines:
-            report.append("✅ NENHUM ARQUIVO MALICIOSO ENCONTRADO!")
-            report.append("")
-        
-        report.append("=" * 80)
-        
-        return "\n".join(report)
+            lines.append("ARQUIVOS JS MALICIOSOS (deletar):")
+            lines.append("-" * 80)
+            for i, p in enumerate(self.malicious_files, 1):
+                lines.append(f"  {i}. {p}")
+            lines.append("")
+
+        if self.malicious_manifests:
+            lines.append("fxmanifest.lua INFECTADOS (limpar):")
+            lines.append("-" * 80)
+            for i, (p, blocks) in enumerate(self.malicious_manifests, 1):
+                lines.append(f"  {i}. {p}")
+                for b in blocks:
+                    preview = b.replace('\n', ' ')[:100]
+                    lines.append(f"     Bloco: {preview}...")
+            lines.append("")
+
+        if self.suspicious_lua:
+            lines.append("LUA SUSPEITO (verificar manualmente):")
+            lines.append("-" * 80)
+            for i, (p, tipo, descricao) in enumerate(self.suspicious_lua, 1):
+                lines.append(f"  {i}. [{tipo}] {p}")
+                lines.append(f"     {descricao}")
+            lines.append("")
+
+        if tudo_limpo:
+            lines.append("NENHUM ARQUIVO MALICIOSO ENCONTRADO!")
+            lines.append("")
+
+        lines.append(sep)
+        return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+def find_server_root(start_path):
+    """
+    Sobe na árvore de diretórios procurando a raiz do servidor FiveM.
+    Marcadores: server.cfg + resources/ (ideal), ou resources/ sozinha.
+    Funciona independente de onde o scanner foi colocado.
+    """
+    path = Path(start_path).resolve()
+
+    best = None
+    for _ in range(8):  # sobe até 8 níveis
+        if (path / 'resources').is_dir():
+            best = path  # salva o candidato mais alto encontrado
+        parent = path.parent
+        if parent == path:
+            break
+        path = parent
+
+    if best:
+        # Prefere o candidato que também tem server.cfg
+        check = best
+        for _ in range(8):
+            if (check / 'server.cfg').exists() and (check / 'resources').is_dir():
+                return check
+            parent = check.parent
+            if parent == check:
+                break
+            check = parent
+        return best
+
+    return Path(start_path).resolve()
 
 
 def main():
     print("=" * 80)
-    print("🔍 SCANNER DE BACKDOOR - Detecção e Remoção de Código Malicioso")
+    print("SCANNER DE BACKDOOR - Deteccao e Remocao de Codigo Malicioso")
     print("=" * 80)
-    print()
-    print(" " * 20 + "╔═══════════════════════════════════╗")
-    print(" " * 20 + "║   🏍️  Desenvolvido por          ║")
-    print(" " * 20 + "║      RYU GARAGE                  ║")
-    print(" " * 20 + "║                                  ║")
-    print(" " * 20 + "║   Proteção e Segurança           ║")
-    print(" " * 20 + "║   para Servidores FiveM          ║")
-    print(" " * 20 + "╚═══════════════════════════════════╝")
-    print()
-    print(" " * 25 + "Desenvolvido com ❤️")
-    print()
-    print("=" * 80)
-    print()
-    
-    # Determina o diretório raiz
-    if len(sys.argv) > 1:
-        root_path = sys.argv[1]
+
+    # Determinar raiz: argumento CLI > auto-detecção a partir do script
+    if len(sys.argv) > 1 and not sys.argv[1].startswith('-'):
+        root_path = Path(sys.argv[1]).resolve()
     else:
-        # Usa o diretório atual
-        root_path = os.getcwd()
-    
-    # Verifica modo dry-run
+        script_dir = Path(os.path.abspath(__file__)).parent
+        root_path = find_server_root(script_dir)
+
     dry_run = '--dry-run' in sys.argv or '-n' in sys.argv
-    
+    auto_clean = '--auto' in sys.argv
+
     if dry_run:
-        print("⚠️  MODO DRY-RUN ATIVADO - Nenhum arquivo será deletado")
-        print()
-    
-    print(f"📁 Escaneando diretório: {root_path}")
-    print()
-    
-    # Cria scanner
+        print("MODO DRY-RUN - nenhum arquivo sera alterado")
+    print(f"\nRaiz detectada: {root_path}\n")
+
     scanner = BackdoorScanner(root_path)
-    
-    # Escaneia
-    print("🔍 Iniciando varredura...")
     scanner.scan_directory()
-    
-    # Gera relatório
+
     report = scanner.generate_report()
-    print(report)
-    
-    # Salva relatório
-    report_file = Path(root_path) / f"relatorio_scan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+    print("\n" + report)
+
+    # Salvar relatório
+    report_path = Path(root_path) / f"relatorio_scan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
     try:
-        with open(report_file, 'w', encoding='utf-8') as f:
+        with open(report_path, 'w', encoding='utf-8') as f:
             f.write(report)
-        print(f"📄 Relatório salvo em: {report_file}")
+        print(f"Relatório salvo em: {report_path}")
     except Exception as e:
-        print(f"⚠️  Não foi possível salvar o relatório: {e}")
-    
-    # Limpa linhas maliciosas de fxmanifest.lua
-    if scanner.malicious_lines:
-        print()
-        if not dry_run:
-            response = input("❓ Deseja remover as linhas maliciosas dos arquivos fxmanifest.lua? (s/N): ").strip().lower()
-            if response in ['s', 'sim', 'y', 'yes']:
-                cleaned, failed = scanner.clean_malicious_manifest_lines(dry_run=False)
-                print()
-                print(f"✅ Linhas removidas: {cleaned}")
-                if failed > 0:
-                    print(f"❌ Falhas ao limpar: {failed}")
-            else:
-                print("❌ Operação cancelada pelo usuário")
+        print(f"Aviso: não foi possível salvar relatório: {e}")
+
+    nada = (
+        not scanner.malicious_files
+        and not scanner.malicious_manifests
+        and not scanner.suspicious_lua
+    )
+    if nada:
+        print("\nSistema limpo.")
+        return
+
+    if scanner.suspicious_lua and not scanner.malicious_files and not scanner.malicious_manifests:
+        print("\nNenhum arquivo para limpeza automatica.")
+        print("Verifique os itens [LUA_RCE] e [LUA_OBFUSCATED] no relatorio manualmente.")
+        return
+
+    # Confirmação de limpeza
+    if not dry_run:
+        if auto_clean:
+            resposta = 's'
         else:
-            scanner.clean_malicious_manifest_lines(dry_run=True)
-    
-    # Deleta arquivos maliciosos
-    if scanner.malicious_files:
-        print()
-        if not dry_run:
-            response = input("❓ Deseja deletar os arquivos maliciosos? (s/N): ").strip().lower()
-            if response in ['s', 'sim', 'y', 'yes']:
-                deleted, failed = scanner.delete_malicious_files(dry_run=False)
-                print()
-                print(f"✅ Arquivos deletados: {deleted}")
-                if failed > 0:
-                    print(f"❌ Falhas ao deletar: {failed}")
-            else:
-                print("❌ Operação cancelada pelo usuário")
+            print()
+            resposta = input("❓ Deseja executar a limpeza agora? (s/N): ").strip().lower()
+
+        if resposta in ('s', 'sim', 'y', 'yes'):
+            blocks_removed, js_deleted = scanner.run_cleanup(dry_run=False)
+            print(f"\n✅ Blocos de manifest removidos: {blocks_removed}")
+            print(f"✅ Arquivos JS deletados: {js_deleted}")
         else:
-            scanner.delete_malicious_files(dry_run=True)
-    
-    if not scanner.malicious_files and not scanner.malicious_lines:
-        print()
-        print("✅ Nenhum arquivo malicioso encontrado! Sistema limpo.")
-    
-    print()
-    print("=" * 80)
+            print("Limpeza cancelada.")
+    else:
+        scanner.run_cleanup(dry_run=True)
+
+    print("\n" + "=" * 80)
     print("✅ Varredura concluída!")
     print("=" * 80)
-    print()
-    print(" " * 20 + "╔═══════════════════════════════════╗")
-    print(" " * 20 + "║   🏍️  RYU GARAGE                 ║")
-    print(" " * 20 + "║   Desenvolvido com ❤️            ║")
-    print(" " * 20 + "╚═══════════════════════════════════╝")
-    print()
 
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\n\n⚠️  Operação cancelada pelo usuário")
+        print("\n\nCancelado pelo usuário.")
         sys.exit(1)
     except Exception as e:
-        print(f"\n❌ Erro fatal: {e}")
+        print(f"\nErro fatal: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
-

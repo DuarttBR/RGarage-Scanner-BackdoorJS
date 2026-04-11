@@ -1,0 +1,13 @@
+================================================================================
+RELATÓRIO DE VARREDURA - SCANNER DE BACKDOOR
+================================================================================
+Data/Hora: 11/04/2026 00:32:25
+Diretório escaneado: C:\Libertália RP
+Arquivos escaneados: 31475
+Diretórios escaneados: 2008
+Arquivos JS maliciosos: 0
+fxmanifest.lua infectados: 0
+
+✅ NENHUM ARQUIVO MALICIOSO ENCONTRADO!
+
+================================================================================

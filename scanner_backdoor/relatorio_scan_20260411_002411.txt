@@ -1,0 +1,20 @@
+================================================================================
+RELATÓRIO DE VARREDURA - SCANNER DE BACKDOOR
+================================================================================
+Data/Hora: 11/04/2026 00:24:11
+Diretório escaneado: C:\Libertália RP
+Arquivos escaneados: 31976
+Diretórios escaneados: 2059
+Arquivos JS maliciosos: 0
+fxmanifest.lua infectados: 3
+
+fxmanifest.lua INFECTADOS:
+--------------------------------------------------------------------------------
+  1. C:\Libertália RP\artifacts\citizen\system_resources\monitor\fxmanifest.lua
+     Bloco: server_scripts {     'entrypoint.js',     'resource/sv_main.lua', --must run first     'resource/sv_...
+  2. C:\Libertália RP\resources\[ scripts ]\[warn]\wnHudv2\fxmanifest.lua
+     Bloco: server_scripts { 	"@vrp/lib/itemlist.lua", 	"@vrp/lib/vehicles.lua", 	"script/lib/utils.lua", 	"scri...
+  3. C:\Libertália RP\resources\smartphone\fxmanifest.lua
+     Bloco: server_scripts {     'server.js' }...
+
+================================================================================
